@@ -6,6 +6,86 @@ require 'action_view'
 
 include ActionView::Helpers::NumberHelper
 
+class Car
+  attr_reader :_date_sold, :vin, :year, :make, :model, :_profit, :inventory_days
+
+  def initialize(car_row)
+    @year      = car_row[1]
+    @make      = car_row[2]
+    @model     = car_row[3]
+    @vin       = car_row[5]
+    @_profit   = car_row[6]
+    @days      = car_row[8]
+    @_date_sold = car_row[11]
+  end
+
+  def vin6
+    vin[0..6]
+  end
+
+  def profit
+    _profit.gsub(/\D/, '').to_f/100 
+  end
+
+  def date_sold
+    Date.strptime(@_date_sold, '%m/%d/%y')
+  end
+
+end
+
+class Dealership
+  #Change these on production to point to the FTP dir where DMS uploads the files.
+  AVAILABLE_CARS_PATH = './MoWAvailableVehiclesSample.csv'
+  SOLD_CARS_PATH      = './MoWSoldVehiclesSample.csv'
+
+  def initialize
+    options = { skip_blanks: true, headers: true }
+    @available_cars  = CSV.read(AVAILABLE_CARS_PATH, options).collect { |row| Car.new(row) }
+    @sold_cars       = CSV.read(SOLD_CARS_PATH, options).collect { |row| Car.new(row) }
+    @sold_today_cars = @sold_cars.select { |car| car.date_sold == Date.today }
+    @sold_month_to_date_cars = @sold_cars.select { |car| car.date_sold.month == Date.today.month }
+  end
+
+  def available_car_count
+    # -1 is because DMS has a boat that we don't count in MoW's inventory.
+    @available_cars.count - 1
+  end
+
+  def todays_sold_count
+    @sold_today_cars.count
+  end
+
+  def todays_profit(formatted = false)
+    @_todays_profit ||= @sold_today_cars.inject(0.0){ |sum, car| sum + car.profit }
+    format_money(formatted, @_todays_profit)
+  end
+
+  def month_to_date_profit(formatted = false)
+    @_month_to_date_profit ||= @sold_month_to_date_cars.inject(0.0){ |sum, car| sum + car.profit }
+    format_money(formatted, @_month_to_date_profit)
+  end
+
+  def todays_profit_per_car(formatted = false)
+    total = todays_profit/todays_sold_count
+    format_money(formatted, total)
+  end
+
+  def month_to_date_sold_count
+    @sold_month_to_date_cars.count
+  end
+
+  def month_to_date_profit_per_car(formatted = false)
+    total = month_to_date_profit/month_to_date_sold_count
+    format_money(formatted, total)
+  end
+
+  private
+
+  def format_money(formatted, amount)
+    formatted ? number_to_currency(amount, precision: 0) : amount
+  end
+end
+
 def send_email(body)
   mail = Mail.new do
     from     'nash@motorsonwheels.com'
@@ -14,39 +94,33 @@ def send_email(body)
     body     body
   end
   mail.delivery_method :sendmail
-  mail.deliver!
+  #mail.deliver!
+  puts body
 end
 
 def money(amount)
  number_to_currency(amount, precision: 0)
 end
 
-available_cars          = CSV.read('./MoWAvailableVehiclesSample.csv', skip_blanks: true, headers: true)
-sold_cars               = CSV.read('./MoWSoldVehiclesSample.csv', skip_blanks: true, headers: true)
-sold_today_cars         = sold_cars.select { |v| Date.strptime(v[11], '%m/%d/%y') == Date.today }
-sold_month_to_date_cars = sold_cars.select { |v| Date.strptime(v[11], '%m/%d/%y').month == Date.today.month }
 
-sold_unit_report =  sold_today_cars.collect { |c| "    #{c[5][0..6]} #{c[1]} #{c[2]} #{c[3]} **Profit:** $#{c[6]} **Days:** #{c[8]}" }.join("\n")
+sold_unit_report = ''
+buyer_message = ''
+#sold_unit_report =  sold_today_cars.collect { |c| "    #{c[5][0..6]} #{c[1]} #{c[2]} #{c[3]} **Profit:** $#{c[6]} **Days:** #{c[8]}" }.join("\n")
 
-sum_today = 0 
-sold_today_cars.each{ |row| sum_today += row[6].gsub(/\D/, '').to_f/100 }
-
-sum_this_month = 0 
-sold_month_to_date_cars.each{ |row| sum_this_month += row[6].gsub(/\D/, '').to_f/100 }
-
-buyer_message = Time.now.saturday? ? "Buyer, add the number of deposits (if any) to #{ 150 - (available_cars.count - 1)}. That's your car purchase limit for next week. \nDo not change this number based on future sales.\nIf it's a negative number, then we're overstocked."  : "Buying limit will be available Saturday."
+#buyer_message = Time.now.saturday? ? "Buyer, add the number of deposits (if any) to #{ 150 - (available_cars.count - 1)}. That's your car purchase limit for next week. \nDo not change this number based on future sales.\nIf it's a negative number, then we're overstocked."  : "Buying limit will be available Saturday."
   
+dealership = Dealership.new
 
 report = %{
-  Total Cars Available: #{available_cars.count - 1}
-  Today's Sales: #{sold_today_cars.count}
-  Today's Total Profit: #{sum_today}
-  Today's Profit/car: #{sold_today_cars.count.zero? ? 0 : money(sum_today/sold_today_cars.count)}
-  Month To Date Sales: #{sold_month_to_date_cars.count}   
-  Month To Date Profit/car: #{money(sum_this_month/sold_month_to_date_cars.count)}
+  Total Cars Available: #{dealership.available_car_count}
+  Today's Sales: #{dealership.todays_sold_count}
+  Today's Total Profit: #{dealership.todays_profit(true)}
+  Today's Profit/car: #{dealership.todays_profit_per_car(true)}
+  Month To Date Sales: #{dealership.month_to_date_sold_count}   
+  Month To Date Profit/car: #{dealership.month_to_date_profit_per_car(true)}
 
   Units sold today: 
-#{sold_today_cars.count.zero? ? '   None' : sold_unit_report}
+   #{dealership.todays_sold_count.zero? ? '   None' : sold_unit_report}
 
 
 #{buyer_message}
