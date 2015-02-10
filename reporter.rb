@@ -101,9 +101,8 @@ end
 module Emailer
   def self.send_email(body)
     mail = Mail.new do
-      from     'nash@motorsonwheels.com'
-      to       'nash@motorsonwheels.com'
-      #to       'nash@motorsonwheels.com,chad@motorsonwheels.com,joad@motorsonwheels.com'
+      from     'fake@domain.com'
+      to       'fake@domain.com'
       subject  "Sales Report for #{Time.now.strftime('%Y/%m/%d')}"
       body     body
     end
