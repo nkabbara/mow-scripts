@@ -1,16 +1,9 @@
-#TODO Add check if uploaded file update/create timestamp hasn'w been refreshed. Means report is out of date.
 require 'csv'
 require 'mail'
 require 'date'
 require 'action_view'
 
 include ActionView::Helpers::NumberHelper
-
-class Date
-  def self.today
-    Date.new(2015, 2, 5)
-  end
-end
 
 class Car
   attr_reader :_date_sold, :vin, :year, :make, :model, :_profit, :inventory_days
