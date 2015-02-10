@@ -6,6 +6,12 @@ require 'action_view'
 
 include ActionView::Helpers::NumberHelper
 
+class Date
+  def self.today
+    Date.new(2015, 2, 5)
+  end
+end
+
 class Car
   attr_reader :_date_sold, :vin, :year, :make, :model, :_profit, :inventory_days
 
@@ -24,7 +30,7 @@ class Car
   end
 
   def profit
-    _profit.gsub(/\D/, '').to_f/100 
+    _profit.gsub(/[^0-9-]/, '').to_f/100 
   end
 
   def date_sold
@@ -37,12 +43,13 @@ class Dealership
   #Change these on production to point to the FTP dir where DMS uploads the files.
   AVAILABLE_CARS_PATH = './MoWAvailableVehiclesSample.csv'
   SOLD_CARS_PATH      = './MoWSoldVehiclesSample.csv'
+  attr_reader :todays_sold_cars
 
   def initialize
     options = { skip_blanks: true, headers: true }
     @available_cars  = CSV.read(AVAILABLE_CARS_PATH, options).collect { |row| Car.new(row) }
     @sold_cars       = CSV.read(SOLD_CARS_PATH, options).collect { |row| Car.new(row) }
-    @sold_today_cars = @sold_cars.select { |car| car.date_sold == Date.today }
+    @todays_sold_cars = @sold_cars.select { |car| car.date_sold == Date.today }
     @sold_month_to_date_cars = @sold_cars.select { |car| car.date_sold.month == Date.today.month }
   end
 
@@ -52,11 +59,11 @@ class Dealership
   end
 
   def todays_sold_count
-    @sold_today_cars.count
+    @todays_sold_cars.count
   end
 
   def todays_profit(formatted = false)
-    @_todays_profit ||= @sold_today_cars.inject(0.0){ |sum, car| sum + car.profit }
+    @_todays_profit ||= @todays_sold_cars.inject(0.0){ |sum, car| sum + car.profit }
     format_money(formatted, @_todays_profit)
   end
 
@@ -86,29 +93,33 @@ class Dealership
   end
 end
 
-def send_email(body)
-  mail = Mail.new do
-    from     'nash@motorsonwheels.com'
-    to       'nash@motorsonwheels.com,chad@motorsonwheels.com,joad@motorsonwheels.com'
-    subject  "Sales Report for #{Time.now.strftime('%Y/%m/%d')}"
-    body     body
+module Reporter
+  def self.sold_car_details(cars)
+    cars.collect do |car| 
+      "    #{car.vin6} #{car.year} #{car.make} #{car.model} **Profit:** $#{car.profit} **Days:** #{car.inventory_days}" 
+    end.join("\n")
   end
-  mail.delivery_method :sendmail
-  #mail.deliver!
-  puts body
+
+  def self.buyer_message(car_count)
+    Time.now.saturday? ? "Buyer, add the number of deposits (if any) to #{ 150 - (car_count - 1)}. That's your car purchase limit for next week. \nDo not change this number based on future sales.\nIf it's a negative number, then we're overstocked."  : "Buying limit will be available Saturday."
+  end
 end
 
-def money(amount)
- number_to_currency(amount, precision: 0)
+module Emailer
+  def self.send_email(body)
+    mail = Mail.new do
+      from     'nash@motorsonwheels.com'
+      to       'nash@motorsonwheels.com'
+      #to       'nash@motorsonwheels.com,chad@motorsonwheels.com,joad@motorsonwheels.com'
+      subject  "Sales Report for #{Time.now.strftime('%Y/%m/%d')}"
+      body     body
+    end
+    mail.delivery_method :sendmail
+    mail.deliver!
+    puts body
+  end
 end
 
-
-sold_unit_report = ''
-buyer_message = ''
-#sold_unit_report =  sold_today_cars.collect { |c| "    #{c[5][0..6]} #{c[1]} #{c[2]} #{c[3]} **Profit:** $#{c[6]} **Days:** #{c[8]}" }.join("\n")
-
-#buyer_message = Time.now.saturday? ? "Buyer, add the number of deposits (if any) to #{ 150 - (available_cars.count - 1)}. That's your car purchase limit for next week. \nDo not change this number based on future sales.\nIf it's a negative number, then we're overstocked."  : "Buying limit will be available Saturday."
-  
 dealership = Dealership.new
 
 report = %{
@@ -120,10 +131,10 @@ report = %{
   Month To Date Profit/car: #{dealership.month_to_date_profit_per_car(true)}
 
   Units sold today: 
-   #{dealership.todays_sold_count.zero? ? '   None' : sold_unit_report}
+#{dealership.todays_sold_count.zero? ? '   None' : Reporter.sold_car_details(dealership.todays_sold_cars)}
 
 
-#{buyer_message}
+  #{Reporter.buyer_message(dealership.available_car_count)}
 }
 
-send_email(report)
+Emailer.send_email(report)
