@@ -108,7 +108,6 @@ module Emailer
     end
     mail.delivery_method :sendmail
     mail.deliver!
-    puts body
   end
 end
 
