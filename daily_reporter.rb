@@ -6,8 +6,9 @@ require 'action_view'
 include ActionView::Helpers::NumberHelper
 
 class Car
-  attr_reader :_date_sold, :vin, :year, :make, :model, :_profit, :inventory_days
+  attr_reader :_date_sold, :vin, :year, :make, :model, :_profit, :days
 
+  #Takes a row from the DMS csv file
   def initialize(car_row)
     @year      = car_row[1]
     @make      = car_row[2]
@@ -22,6 +23,7 @@ class Car
     vin[0..6]
   end
 
+  #Remove all weird chars that DMS tends to insert into numbers
   def profit
     _profit.gsub(/[^0-9-]/, '').to_f/100 
   end
@@ -40,14 +42,14 @@ class Dealership
 
   def initialize
     options = { skip_blanks: true, headers: true }
-    @available_cars  = CSV.read(AVAILABLE_CARS_PATH, options).collect { |row| Car.new(row) }
-    @sold_cars       = CSV.read(SOLD_CARS_PATH, options).collect { |row| Car.new(row) }
+    @available_cars   = CSV.read(AVAILABLE_CARS_PATH, options).collect { |row| Car.new(row) }
+    @sold_cars        = CSV.read(SOLD_CARS_PATH, options).collect { |row| Car.new(row) }
     @todays_sold_cars = @sold_cars.select { |car| car.date_sold == Date.today }
     @sold_month_to_date_cars = @sold_cars.select { |car| car.date_sold.month == Date.today.month }
   end
 
+  # -1 is because DMS has a boat that is not counted in MoW's inventory.
   def available_car_count
-    # -1 is because DMS has a boat that we don't count in MoW's inventory.
     @available_cars.count - 1
   end
 
@@ -86,19 +88,42 @@ class Dealership
   end
 end
 
+#Report formatting related methods.
 module Reporter
   def self.sold_car_details(cars)
     cars.collect do |car| 
-      "    #{car.vin6} #{car.year} #{car.make} #{car.model} **Profit:** $#{car.profit} **Days:** #{car.inventory_days}" 
+      "        #{car.vin6} #{car.year} #{car.make} #{car.model} **Profit:** $#{car.profit} **Days:** #{car.days}" 
     end.join("\n")
   end
 
-  def self.buyer_message(car_count)
-    Time.now.saturday? ? "Buyer, add the number of deposits (if any) to #{ 150 - (car_count - 1)}. That's your car purchase limit for next week. \nDo not change this number based on future sales.\nIf it's a negative number, then we're overstocked."  : "Buying limit will be available Saturday."
+  def self.saturday_message(car_count)
+    "Buyer, add the number of deposits (if any) to #{ 150 - (car_count - 1)}. That's your car purchase limit for next week.      \nDo not change this number based on future sales.     \nIf it's a negative number, then MoW is overstocked."
   end
+
+  def self.buyer_message(car_count)
+    Time.now.saturday? ?  saturday_message(car_count) : "Buying limit will be available Saturday."
+  end
+
+  def self.build_report(dealership)
+    %{
+      Total Cars Available: #{dealership.available_car_count}
+      Today's Sales: #{dealership.todays_sold_count}
+      Today's Total Profit: #{dealership.todays_profit(true)}
+      Today's Profit/car: #{dealership.todays_profit_per_car(true)}
+      Month To Date Sales: #{dealership.month_to_date_sold_count}   
+      Month To Date Profit/car: #{dealership.month_to_date_profit_per_car(true)}
+
+      Units sold today: 
+#{dealership.todays_sold_count.zero? ? '       None' : sold_car_details(dealership.todays_sold_cars)}
+
+
+      #{buyer_message(dealership.available_car_count)}
+    }
+  end
+
 end
 
-module Emailer
+module DailyReporter
   def self.send_email(body)
     mail = Mail.new do
       from     'fake@domain.com'
@@ -109,23 +134,12 @@ module Emailer
     mail.delivery_method :sendmail
     mail.deliver!
   end
+
+  def self.run
+    dealership = Dealership.new
+    report     = Reporter.build_report(dealership)
+    send_email(report)
+  end
 end
 
-dealership = Dealership.new
-
-report = %{
-  Total Cars Available: #{dealership.available_car_count}
-  Today's Sales: #{dealership.todays_sold_count}
-  Today's Total Profit: #{dealership.todays_profit(true)}
-  Today's Profit/car: #{dealership.todays_profit_per_car(true)}
-  Month To Date Sales: #{dealership.month_to_date_sold_count}   
-  Month To Date Profit/car: #{dealership.month_to_date_profit_per_car(true)}
-
-  Units sold today: 
-#{dealership.todays_sold_count.zero? ? '   None' : Reporter.sold_car_details(dealership.todays_sold_cars)}
-
-
-  #{Reporter.buyer_message(dealership.available_car_count)}
-}
-
-Emailer.send_email(report)
+DailyReporter.run
