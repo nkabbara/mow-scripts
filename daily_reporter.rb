@@ -1,3 +1,6 @@
+#
+#TODO: Cleanup code duplication introduced in today's update (2015/02/13)
+#
 require 'csv'
 require 'mail'
 require 'date'
@@ -6,7 +9,7 @@ require 'action_view'
 include ActionView::Helpers::NumberHelper
 
 class Car
-  attr_reader :_date_sold, :vin, :year, :make, :model, :_profit, :days
+  attr_reader :_date_sold, :vin, :year, :make, :model, :profit, :days, :sale_type, :warranty_profit
 
   #Takes a row from the DMS csv file
   def initialize(car_row)
@@ -14,22 +17,26 @@ class Car
     @make      = car_row[2]
     @model     = car_row[3]
     @vin       = car_row[5]
-    @_profit   = car_row[6]
+    @profit    = clean_number(car_row[6])
     @days      = car_row[8]
-    @_date_sold = car_row[11]
+    @_date_sold      = car_row[11]
+    @sale_type       = car_row[12].blank? ? :cash : :finance
+    @warranty_profit = clean_number(car_row[13])
   end
 
   def vin6
     vin[0..6]
   end
 
-  #Remove all weird chars that DMS tends to insert into numbers
-  def profit
-    _profit.gsub(/[^0-9-]/, '').to_f/100 
-  end
-
   def date_sold
     Date.strptime(@_date_sold, '%m/%d/%y')
+  end
+
+  private
+  #Remove all weird chars that DMS tends to insert into numbers
+  def clean_number(num)
+    return 0.0 if num.blank?
+    num.gsub(/[^0-9-]/, '').to_f/100 
   end
 
 end
@@ -57,6 +64,18 @@ class Dealership
     @todays_sold_cars.count
   end
 
+  def todays_warranty_sold_count
+    @todays_sold_cars.inject(0) { |count, car| car.warranty_profit > 0 ? (count + 1) : count }
+  end
+
+  def todays_cash_count
+    @todays_sold_cars.inject(0) { |count, car| car.sale_type == :cash ? (count + 1) : count }
+  end
+
+  def todays_finance_count
+    @todays_sold_cars.inject(0) { |count, car| car.sale_type == :finance ? (count + 1) : count }
+  end
+
   def todays_profit(formatted = false)
     @_todays_profit ||= @todays_sold_cars.inject(0.0){ |sum, car| sum + car.profit }
     format_money(formatted, @_todays_profit)
@@ -74,6 +93,22 @@ class Dealership
 
   def month_to_date_sold_count
     @sold_month_to_date_cars.count
+  end
+
+  def month_to_date_cash_count
+    @sold_month_to_date_cars.inject(0) { |count, car| car.sale_type == :cash ? (count + 1) : count }
+  end
+
+  def month_to_date_finance_count
+    @_month_to_date_finance_count = @sold_month_to_date_cars.inject(0) { |count, car| car.sale_type == :finance ? (count + 1) : count }
+  end
+
+  def month_to_date_warranty_count
+    @_month_to_date_warranty_count ||= @sold_month_to_date_cars.inject(0) { |count, car| car.warranty_profit > 0 ? (count + 1) : count }
+  end
+
+  def month_to_date_warranty_percentage
+   (month_to_date_warranty_count * 100)/ month_to_date_finance_count 
   end
 
   def month_to_date_profit_per_car(formatted = false)
@@ -107,11 +142,13 @@ module Reporter
   def self.build_report(dealership)
     %{
       Total Cars Available: #{dealership.available_car_count}
-      Today's Sales: #{dealership.todays_sold_count}
+      Today's Car Sales: #{dealership.todays_sold_count} (#{dealership.todays_cash_count} cash and #{dealership.todays_finance_count} financed)
+      Today’s Warranty Sales: #{dealership.todays_warranty_sold_count}
       Today's Total Profit: #{dealership.todays_profit(true)}
-      Today's Profit/car: #{dealership.todays_profit_per_car(true)}
-      Month To Date Sales: #{dealership.month_to_date_sold_count}   
-      Month To Date Profit/car: #{dealership.month_to_date_profit_per_car(true)}
+      Today's Profit/Car: #{dealership.todays_profit_per_car(true)}
+      Month To Date Sales: #{dealership.month_to_date_sold_count} (#{dealership.month_to_date_cash_count} cash and #{dealership.month_to_date_finance_count} financed)
+      Month To Date Warranty Sales: #{dealership.month_to_date_warranty_count} (#{dealership.month_to_date_warranty_percentage}% of financed cars)
+      Month To Date Profit/Car: #{dealership.month_to_date_profit_per_car(true)}
 
       Units sold today: 
 #{dealership.todays_sold_count.zero? ? '       None' : sold_car_details(dealership.todays_sold_cars)}
@@ -124,6 +161,10 @@ module Reporter
 end
 
 module DailyReporter
+  def self.env
+    :test
+  end
+
   def self.send_email(body)
     mail = Mail.new do
       from     'fake@domain.com'
@@ -132,7 +173,7 @@ module DailyReporter
       body     body
     end
     mail.delivery_method :sendmail
-    mail.deliver!
+    env == :test ? puts(body) : mail.deliver!
   end
 
   def self.run
@@ -141,5 +182,14 @@ module DailyReporter
     send_email(report)
   end
 end
+
+if DailyReporter.env == :test
+  Date.class_eval do
+    def self.today
+      Date.new(2015, 2, 13)
+    end
+  end
+end
+
 
 DailyReporter.run
