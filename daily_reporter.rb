@@ -1,6 +1,3 @@
-#
-#TODO: Cleanup code duplication introduced in today's update (2015/02/13)
-#
 require 'csv'
 require 'mail'
 require 'date'
@@ -52,7 +49,7 @@ class Dealership
     @available_cars   = CSV.read(AVAILABLE_CARS_PATH, options).collect { |row| Car.new(row) }
     @sold_cars        = CSV.read(SOLD_CARS_PATH, options).collect { |row| Car.new(row) }
     @todays_sold_cars = @sold_cars.select { |car| car.date_sold == Date.today }
-    @sold_month_to_date_cars = @sold_cars.select { |car| car.date_sold.month == Date.today.month }
+    @month_to_date_sold_cars = @sold_cars.select { |car| car.date_sold.month == Date.today.month }
   end
 
   # -1 is because DMS has a boat that is not counted in MoW's inventory.
@@ -65,15 +62,15 @@ class Dealership
   end
 
   def todays_warranty_sold_count
-    @todays_sold_cars.inject(0) { |count, car| car.warranty_profit > 0 ? (count + 1) : count }
+    todays_sold_car_count_with { self.warranty_profit > 0 }
   end
 
   def todays_cash_count
-    @todays_sold_cars.inject(0) { |count, car| car.sale_type == :cash ? (count + 1) : count }
+    todays_sold_car_count_with { self.sale_type == :cash }
   end
 
   def todays_finance_count
-    @todays_sold_cars.inject(0) { |count, car| car.sale_type == :finance ? (count + 1) : count }
+    todays_sold_car_count_with { self.sale_type == :finance }
   end
 
   def todays_profit(formatted = false)
@@ -82,7 +79,7 @@ class Dealership
   end
 
   def month_to_date_profit(formatted = false)
-    @_month_to_date_profit ||= @sold_month_to_date_cars.inject(0.0){ |sum, car| sum + car.profit }
+    @_month_to_date_profit ||= @month_to_date_sold_cars.inject(0.0){ |sum, car| sum + car.profit }
     format_money(formatted, @_month_to_date_profit)
   end
 
@@ -92,19 +89,19 @@ class Dealership
   end
 
   def month_to_date_sold_count
-    @sold_month_to_date_cars.count
+    @month_to_date_sold_cars.count
   end
 
   def month_to_date_cash_count
-    @sold_month_to_date_cars.inject(0) { |count, car| car.sale_type == :cash ? (count + 1) : count }
+    month_to_date_sold_car_count_with { self.sale_type == :cash }
   end
 
   def month_to_date_finance_count
-    @_month_to_date_finance_count = @sold_month_to_date_cars.inject(0) { |count, car| car.sale_type == :finance ? (count + 1) : count }
+    @_month_to_date_finance_count ||= month_to_date_sold_car_count_with { self.sale_type == :finance }
   end
 
   def month_to_date_warranty_count
-    @_month_to_date_warranty_count ||= @sold_month_to_date_cars.inject(0) { |count, car| car.warranty_profit > 0 ? (count + 1) : count }
+    @_month_to_date_warranty_count ||= month_to_date_sold_car_count_with { self.warranty_profit > 0 }
   end
 
   def month_to_date_warranty_percentage
@@ -117,6 +114,19 @@ class Dealership
   end
 
   private
+
+  def todays_sold_car_count_with(&block)
+    x_time_sold_cars_with(@todays_sold_cars, block)
+  end
+
+  def month_to_date_sold_car_count_with(&block)
+    x_time_sold_cars_with(@month_to_date_sold_cars, block)
+  end
+
+  #We're really passing around a proc, not a block here
+  def x_time_sold_cars_with(cars, block)
+    cars.inject(0) { |count, car| car.instance_eval(&block) ? (count + 1) : count }
+  end
 
   def format_money(formatted, amount)
     formatted ? number_to_currency(amount, precision: 0) : amount

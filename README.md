@@ -1,5 +1,5 @@
 # mow-scripts
-Scripts used at Motors On Wheels (MoW) to make life easy-ier
+Scripts used at Motors On Wheels (MoW) to make life easy-ier. We decided not to write tests for these since they're not mission critical (no decisions are made based on them), but I still get butterflies in my stomach whenever I run them to make sure they're functional.
 
 ## daily-reporter.rb
 
